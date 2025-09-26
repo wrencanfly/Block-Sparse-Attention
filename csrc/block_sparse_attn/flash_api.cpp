@@ -216,7 +216,12 @@ void run_mha_fwd_block(Flash_fwd_params &params, cudaStream_t stream, bool force
     FP16_SWITCH(!params.is_bf16, [&] {
         FWD_BLOCK_HEADDIM_SWITCH(params.d, [&] {
             if (params.num_splits <= 1 && !force_split_kernel) {
-                run_mha_fwd_block_<elem_type, kHeadDim>(params, stream);
+                if (params.use_pair_list) {
+                    // Dispatch to pair-list path (currently stubbed to legacy).
+                    run_mha_fwd_block_pairs<elem_type, kHeadDim>(params, stream);
+                } else {
+                    run_mha_fwd_block_<elem_type, kHeadDim>(params, stream);
+                }
             }
         });
     });
@@ -1311,6 +1316,12 @@ mha_fwd_kvcache(at::Tensor &q,                 // batch_size x seqlen_q x num_he
                      window_size_left,
                      window_size_right);
 
+    // pair-list not used in kv-cache forward path
+    params.tile_pairs_row_ptr = nullptr;
+    params.tile_pairs = nullptr;
+    params.use_pair_list = false;
+
+
     at::Tensor k, v, k_padded, v_padded;
     if (k_.has_value()) {
         TORCH_CHECK(v_.has_value(), "If key is supplied, value must also be passed in");
@@ -1458,6 +1469,8 @@ mha_fwd_block(const at::Tensor &q,
               const at::Tensor &head_mask_type, // (num_heads)
               c10::optional<at::Tensor> &streaming_info_, // (num_heads, 2)
               c10::optional<at::Tensor> &row_blockmask_,   // (batch_size, num_blocksparse_heads, seqlen_m / m_block_dim, seqlen_n / n_block_dim)
+              c10::optional<at::Tensor> tile_pairs_row_ptr_,
+              c10::optional<at::Tensor> tile_pairs_data_,
               const int max_seqlen_q_,
               const int max_seqlen_k_,
               const float p_dropout,
@@ -1621,13 +1634,46 @@ mha_fwd_block(const at::Tensor &q,
                      window_size_right);
 
     params.head_mask_type = static_cast<int *>(head_mask_type.data_ptr());
-    if(has_blockmask){
+    if (has_blockmask) {
         params.blockmask = static_cast<int *>(row_blockmask.data_ptr());
         params.m_block_dim = m_block_dim;
         params.n_block_dim = n_block_dim;
         params.num_blocksparse_heads = num_blocksparse_heads;
-    }else{
+    } else {
         params.blockmask = nullptr;
+    }
+
+    // Wire optional tile-pair CSR (host-precomputed 64->128 pairing).
+    at::Tensor tile_pairs_row_ptr_keepalive;
+    at::Tensor tile_pairs_data_keepalive;
+    params.tile_pairs_row_ptr = nullptr;
+    params.tile_pairs = nullptr;
+    params.use_pair_list = false;
+    if (tile_pairs_row_ptr_.has_value() && tile_pairs_data_.has_value()) {
+        auto row_ptr = tile_pairs_row_ptr_.value();
+        auto pairs = tile_pairs_data_.value();
+        TORCH_CHECK(row_ptr.dtype() == torch::kInt32, "tile_pairs_row_ptr must be int32");
+        TORCH_CHECK(pairs.dtype() == torch::kInt32, "tile_pairs_data must be int32");
+        CHECK_DEVICE(row_ptr); CHECK_DEVICE(pairs);
+        TORCH_CHECK(row_ptr.stride(-1) == 1, "tile_pairs_row_ptr must be contiguous in last dim");
+        TORCH_CHECK(pairs.stride(-1) == 1, "tile_pairs_data must be contiguous in last dim");
+
+        // Expect last dim 4 (int4); if 3, pad to 4 with zeros.
+        if (pairs.size(-1) == 3) {
+            auto pad_sizes = pairs.sizes().vec();
+            pad_sizes.back() = 1;
+            auto zeros_last = torch::zeros(pad_sizes, pairs.options());
+            tile_pairs_data_keepalive = torch::cat({pairs, zeros_last}, -1);
+        } else if (pairs.size(-1) == 4) {
+            tile_pairs_data_keepalive = pairs;
+        } else {
+            TORCH_CHECK(false, "tile_pairs_data last dim must be 3 or 4");
+        }
+        tile_pairs_row_ptr_keepalive = row_ptr;
+
+        params.tile_pairs_row_ptr = tile_pairs_row_ptr_keepalive.data_ptr<int>();
+        params.tile_pairs = reinterpret_cast<int4*>(tile_pairs_data_keepalive.data_ptr<int>());
+        params.use_pair_list = true;
     }
 
     if(has_streaming_info){

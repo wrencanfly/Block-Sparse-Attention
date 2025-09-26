@@ -84,6 +84,11 @@ struct Flash_fwd_params : public Qkv_params {
     int * __restrict__ seqused_k;
 
     int *__restrict__ blockmask;
+    // 64-pair metadata (host-precomputed CSR)
+    int* __restrict__ tile_pairs_row_ptr;
+    int4* __restrict__ tile_pairs;
+    bool use_pair_list;
+
     int *__restrict__ streaming_info;
     int *__restrict__ head_mask_type;
     // add by JXGuo
@@ -193,4 +198,6 @@ template<typename T, int Headdim> void run_mha_fwd_splitkv_dispatch(Flash_fwd_pa
 template<typename T, int Headdim> void run_mha_bwd_(Flash_bwd_params &params, cudaStream_t stream, const bool configure);
 
 template<typename T, int Headdim> void run_mha_fwd_block_(Flash_fwd_params &params, cudaStream_t stream);
+// Pair-list forward path (64+64 -> 128) — initial stub dispatch
+template<typename T, int Headdim> void run_mha_fwd_block_pairs(Flash_fwd_params &params, cudaStream_t stream);
 template<typename T, int Headdim> void run_mha_bwd_block_(Flash_bwd_params &params, cudaStream_t stream, const bool configure);

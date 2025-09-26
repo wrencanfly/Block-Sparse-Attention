@@ -1887,6 +1887,10 @@ inline __device__ void compute_block_attn(const Params &params) {
     
 }
 
+// Pair-list path: initially reuse the same 1-rowblock implementation.
+// Later we will specialize this to iterate CSR pairs and perform 2x64 gathers per 128 compute.
+/* reverted: pair-list compute_block_attn_pairs moved out of header to reduce rebuild cost */
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 template<typename Kernel_traits, bool Is_causal, bool Is_local, bool Has_alibi, bool Is_even_MN, bool Is_even_K, bool Split, bool Append_KV, typename Params>

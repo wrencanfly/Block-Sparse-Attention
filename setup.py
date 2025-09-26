@@ -190,6 +190,8 @@ if not SKIP_CUDA_BUILD:
                 "csrc/block_sparse_attn/src/flash_fwd_block_hdim64_bf16_sm80.cu",
                 "csrc/block_sparse_attn/src/flash_fwd_block_hdim128_fp16_sm80.cu",
                 "csrc/block_sparse_attn/src/flash_fwd_block_hdim128_bf16_sm80.cu",
+                # pair-list forward path (stub)
+                "csrc/block_sparse_attn/src/flash_fwd_block_pairs_stub.cu",
                 
                 "csrc/block_sparse_attn/src/flash_bwd_block_hdim32_fp16_sm80.cu",
                 "csrc/block_sparse_attn/src/flash_bwd_block_hdim32_bf16_sm80.cu",

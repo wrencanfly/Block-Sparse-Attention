@@ -25,6 +25,8 @@ __global__ void flash_fwd_block_kernel(Flash_fwd_params params) {
     flash::compute_block_attn<Kernel_traits, Is_dropout, Is_causal, Is_local, Has_alibi, Is_even_MN, Is_even_K, Return_softmax, Is_exact_streaming>(params);
 }
 
+/* reverted: pair-list kernel moved to .cu to avoid touching header */
+
 template<typename Kernel_traits, bool Is_causal, bool Is_local, bool Has_alibi, bool Is_even_MN, bool Is_even_K, bool Split, bool Append_KV>
 __global__ void flash_fwd_splitkv_kernel(Flash_fwd_params params) {
     flash::compute_attn_splitkv<Kernel_traits, Is_causal, Is_local, Has_alibi, Is_even_MN, Is_even_K, Split, Append_KV>(params);
@@ -123,6 +125,8 @@ void run_flash_fwd_block(Flash_fwd_params &params, cudaStream_t stream) {
         });
     });
 }
+
+/* reverted: pair-list dispatcher moved to .cu to reduce template rebuild */
 
 
 template<typename Kernel_traits>
